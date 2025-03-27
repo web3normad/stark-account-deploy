@@ -1,0 +1,10 @@
+{
+  "type": "Argent",
+  "privateKey": "0x600a03fad8cf09ea345444c658e4643f366f7f9f297f5a7ca7591b50f92281f",
+  "publicKey": "0x7f3592544099b83c5943dd362e1a2fce5bb9e19ccfbd1834bc86dd9a1be71eb",
+  "address": "0x37990cd7943c09d166965306aa0fc068f95570ae57c89d5c3b2409c1eaaf9ef",
+  "deployed": false,
+  "ethFundingAmount": "2000000000000000",
+  "strkFundingAmount": "2000000000000000",
+  "createdAt": "2025-03-21T10:31:54.119Z"
+}

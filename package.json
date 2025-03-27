@@ -1,0 +1,15 @@
+{
+  "name": "starknet-wallet-creator",
+  "version": "1.0.0",
+  "description": "Simple Starknet wallet creator tool",
+  "main": "wallet.js",
+  "type": "module",
+  "scripts": {
+    "create": "node wallet.js create",
+    "deploy": "node wallet.js deploy"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "starknet": "^7.0.0-beta.3"
+  }
+}
