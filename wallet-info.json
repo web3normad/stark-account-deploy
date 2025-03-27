@@ -1,10 +1,10 @@
 {
   "type": "Argent",
-  "privateKey": "0x600a03fad8cf09ea345444c658e4643f366f7f9f297f5a7ca7591b50f92281f",
-  "publicKey": "0x7f3592544099b83c5943dd362e1a2fce5bb9e19ccfbd1834bc86dd9a1be71eb",
-  "address": "0x37990cd7943c09d166965306aa0fc068f95570ae57c89d5c3b2409c1eaaf9ef",
+  "privateKey": "0x7c1e5af9a93e1189c2ffafa3869ca5efd7f591e968f6bcd47e7010f9701d28",
+  "publicKey": "0x660ee4752110025dfd47861427bb43d566bc0f5a72321f6fd1f63f4b5a1e2c5",
+  "address": "0x6acb7e890dff7455527a5339464fbaded557d3bdc5fba68c7cb019cc03af88a",
   "deployed": false,
   "ethFundingAmount": "2000000000000000",
   "strkFundingAmount": "2000000000000000",
-  "createdAt": "2025-03-21T10:31:54.119Z"
+  "createdAt": "2025-03-27T09:51:27.110Z"
 }
