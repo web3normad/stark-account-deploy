@@ -16,14 +16,17 @@ import fs from 'fs';
 dotenv.config();
 
 // Configuration
-const NODE_URL = process.env.STARKNET_NODE_URL || 'https://free-rpc.nethermind.io/sepolia-juno/v0_8';
+const NODE_URL = process.env.STARKNET_NODE_URL || 'https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_7/o1lEX0VBV5svBnSxttojbhEM0_p6uy4_';
 const FUND_ACCOUNT = process.env.FUND_ACCOUNT !== 'false'; 
 const ETH_FUNDING_AMOUNT = process.env.ETH_FUNDING_AMOUNT || '2000000000000000'; 
 const STRK_FUNDING_AMOUNT = process.env.STRK_FUNDING_AMOUNT || '2000000000000000'; 
 const FUNDER_PRIVATE_KEY = process.env.FUNDER_PRIVATE_KEY; 
 const FUNDER_ADDRESS = process.env.FUNDER_ADDRESS; 
+
+// Contracts
 const ETH_CONTRACT = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
 const STRK_CONTRACT = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d"; 
+const ARGENT_ACCOUNT_CLASS_HASH = '0x036078334509b514626504edc9fb252328d1a240e4e948bef8d0c08dff45927f';
 
 // ERC20 ABI 
 const tokenAbi = [
@@ -46,26 +49,10 @@ const tokenAbi = [
       }
     ],
     "state_mutability": "external"
-  },
-  {
-    "type": "function",
-    "name": "balanceOf",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "core::starknet::contract_address::ContractAddress"
-      }
-    ],
-    "outputs": [
-      {
-        "type": "core::integer::u256"
-      }
-    ],
-    "state_mutability": "view"
   }
 ];
 
-// Function to fund the account with ETH or STRK
+// Account funding
 async function fundAccount(accountAddress, tokenType = 'all') {
   if (!FUND_ACCOUNT) {
     console.log('Auto-funding disabled. Please fund the account manually.');
@@ -78,68 +65,91 @@ async function fundAccount(accountAddress, tokenType = 'all') {
   }
 
   try {
-    const provider = new RpcProvider({ nodeUrl: NODE_URL });
-    const funderAccount = new Account(provider, FUNDER_ADDRESS, FUNDER_PRIVATE_KEY);
-    let fundingSuccess = true;
+    const provider = new RpcProvider({ 
+      nodeUrl: NODE_URL,
+      rpcVersion: '0.7' 
+    });
 
-    // Fund with ETH 
-    if (tokenType === 'all' || tokenType === 'eth') {
-      console.log(`Attempting to fund account ${accountAddress} with ${Number(ETH_FUNDING_AMOUNT) / 1e18} ETH...`);
+    
+    const funderAccount = new Account(
+      provider, 
+      FUNDER_ADDRESS, 
+      FUNDER_PRIVATE_KEY, 
+      '1'  
+    );
 
-      const ethContract = new Contract(tokenAbi, ETH_CONTRACT, provider);
-      ethContract.connect(funderAccount);
+    async function fundToken(tokenContractAddress, tokenType, fundingAmount) {
+      console.log(`Attempting to fund ${accountAddress} with ${Number(fundingAmount) / 1e18} ${tokenType.toUpperCase()}...`);
 
-      const ethBalanceResponse = await ethContract.balanceOf(FUNDER_ADDRESS);
-      const ethBalance = BigInt(ethBalanceResponse.toString());
+      try {
+        
+        const tokenContract = new Contract(tokenAbi, tokenContractAddress, provider);
+        tokenContract.connect(funderAccount);
 
-      if (ethBalance < BigInt(ETH_FUNDING_AMOUNT)) {
-        console.log(`❌ Funder account has insufficient ETH: ${Number(ethBalance) / 1e18} ETH`);
-        console.log(`Required: ${Number(ETH_FUNDING_AMOUNT) / 1e18} ETH`);
-        fundingSuccess = false;
-      } else {
-        const ethAmount = {
-          low: BigInt(ETH_FUNDING_AMOUNT) & BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'),
-          high: BigInt(ETH_FUNDING_AMOUNT) >> BigInt(128),
+       
+        const tokenAmount = {
+          low: (BigInt(fundingAmount) & BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')).toString(),
+          high: (BigInt(fundingAmount) >> BigInt(128)).toString()
         };
 
-        console.log(`Transferring ${Number(ETH_FUNDING_AMOUNT) / 1e18} ETH to ${accountAddress}...`);
+        
+        const transferCall = {
+          contractAddress: tokenContractAddress,
+          entrypoint: 'transfer',
+          calldata: CallData.compile({
+            recipient: accountAddress,
+            amount: tokenAmount
+          })
+        };
 
-        // Generate hash signature
-        const txHash = hash.computeHashOnElements([
-          FUNDER_ADDRESS,
-          ETH_CONTRACT,
-          'transfer',
-          accountAddress,
-          ethAmount.low,
-          ethAmount.high,
-        ]);
-        const signature = ec.starkCurve.sign(txHash, FUNDER_PRIVATE_KEY);
-
-        const ethTx = await funderAccount.execute([
-          {
-            contractAddress: ETH_CONTRACT,
-            entrypoint: 'transfer',
-            calldata: [accountAddress, ethAmount.low, ethAmount.high],
-          },
-        ], undefined, {
-          maxFee: '0x100000', 
+       
+        const txConfig = {
+          version: 3,
           nonce: await funderAccount.getNonce(),
-          signature: [signature.r.toString(), signature.s.toString()], 
+          maxFee: 0,  // Let network estimate
+          skipValidate: true
+        };
+
+        const tx = await funderAccount.execute(
+          [transferCall], 
+          undefined, 
+          txConfig
+        );
+
+        console.log(`${tokenType.toUpperCase()} Transfer Hash:`, tx.transaction_hash);
+
+        
+        await provider.waitForTransaction(tx.transaction_hash, { 
+          retryInterval: 2000,  
+          maxRetries: 10         
         });
 
-        console.log('ETH funding transaction hash:', ethTx.transaction_hash);
-        console.log('Waiting for ETH transaction confirmation...');
-
-        await provider.waitForTransaction(ethTx.transaction_hash);
-        console.log('✅ ETH funding transaction confirmed!');
+        console.log(`✅ Successfully funded ${accountAddress} with ${tokenType.toUpperCase()}`);
+        return true;
+      } catch (error) {
+        console.error(`Funding ${tokenType.toUpperCase()} Error:`, error);
+        return false;
       }
     }
 
-    // Similar logic for STRK funding...
+    let fundingResults = [];
 
-    return fundingSuccess;
+    
+    if (tokenType === 'all' || tokenType === 'eth') {
+      const ethFundResult = await fundToken(ETH_CONTRACT, 'eth', ETH_FUNDING_AMOUNT);
+      fundingResults.push(ethFundResult);
+    }
+
+    if (tokenType === 'all' || tokenType === 'strk') {
+      const strkFundResult = await fundToken(STRK_CONTRACT, 'strk', STRK_FUNDING_AMOUNT);
+      fundingResults.push(strkFundResult);
+    }
+
+   
+    return fundingResults.every(result => result === true);
+
   } catch (error) {
-    console.error('Error funding account:', error);
+    console.error('Comprehensive Funding Error:', error);
     return false;
   }
 }
@@ -149,10 +159,14 @@ async function createAndDeployArgentAccount() {
   try {
     console.log('=== Creating and Deploying Argent Wallet ===');
 
-    // Step 1: Create the wallet
+    // Create the wallet
     console.log('Creating Argent wallet...');
-    const provider = new RpcProvider({ nodeUrl: NODE_URL });
+    const provider = new RpcProvider({ 
+      nodeUrl: NODE_URL,
+      rpcVersion: '0.7'
+    });
 
+    // Generate keys
     const privateKey = stark.randomAddress();
     const starkKeyPub = ec.starkCurve.getStarkKey(privateKey);
 
@@ -160,8 +174,7 @@ async function createAndDeployArgentAccount() {
     console.log('Private Key:', privateKey);
     console.log('Public Key:', starkKeyPub);
 
-    const argentAccountClassHash = '0x036078334509b514626504edc9fb252328d1a240e4e948bef8d0c08dff45927f';
-
+    // Prepare constructor arguments
     const axSigner = new CairoCustomEnum({ Starknet: { pubkey: starkKeyPub } });
     const axGuardian = new CairoOption(CairoOptionVariant.None);
     const argentConstructorCallData = CallData.compile({
@@ -169,9 +182,10 @@ async function createAndDeployArgentAccount() {
       guardian: axGuardian,
     });
 
+    // Calculate contract address
     const contractAddress = hash.calculateContractAddressFromHash(
       starkKeyPub,
-      argentAccountClassHash,
+      ARGENT_ACCOUNT_CLASS_HASH,
       argentConstructorCallData,
       0
     );
@@ -179,7 +193,7 @@ async function createAndDeployArgentAccount() {
     console.log('\n--- Account Information ---');
     console.log('Precalculated Address:', contractAddress);
 
-    // Save wallet info to file
+    // Save wallet info
     const walletInfo = {
       type: 'Argent',
       privateKey,
@@ -194,9 +208,9 @@ async function createAndDeployArgentAccount() {
     fs.writeFileSync('./wallet-info.json', JSON.stringify(walletInfo, null, 2));
     console.log('\n✅ Wallet information saved to wallet-info.json');
 
-    // Step 2: Fund the wallet
+    // Fund the wallet
     console.log('\n=== Funding Wallet ===');
-    const funded = await fundAccount(contractAddress, 'all');
+    const funded = await fundAccount(contractAddress);
 
     if (!funded) {
       console.log('\n⚠️ Funding failed. You need to fund this address manually before deployment.');
@@ -206,18 +220,24 @@ async function createAndDeployArgentAccount() {
       return;
     }
 
-    // Step 3: Deploy the wallet
+    //  Deploy the wallet
     console.log('\n=== Deploying Wallet ===');
     const account = new Account(provider, contractAddress, privateKey);
 
     const deployAccountPayload = {
-      classHash: argentAccountClassHash,
+      classHash: ARGENT_ACCOUNT_CLASS_HASH,
       constructorCalldata: argentConstructorCallData,
       contractAddress: contractAddress,
       addressSalt: starkKeyPub,
     };
 
-    const { transaction_hash, contract_address } = await account.deployAccount(deployAccountPayload);
+    const { transaction_hash, contract_address } = await account.deployAccount({
+      classHash: ARGENT_ACCOUNT_CLASS_HASH,
+      constructorCalldata: argentConstructorCallData,
+      contractAddress: contractAddress,
+      addressSalt: starkKeyPub,
+      version: 3 
+    });
 
     console.log('Deployment transaction hash:', transaction_hash);
     console.log('Waiting for transaction confirmation...');
@@ -236,11 +256,20 @@ async function createAndDeployArgentAccount() {
       fs.writeFileSync('./wallet-info.json', JSON.stringify(walletInfo, null, 2));
       console.log('Wallet information updated in wallet-info.json');
     }
+
+    return {
+      privateKey,
+      publicKey: starkKeyPub,
+      address: contract_address
+    };
+
   } catch (error) {
     console.error('Error in create and deploy process:', error);
     throw error;
   }
 }
 
-// Run the script
-createAndDeployArgentAccount();
+
+createAndDeployArgentAccount()
+  .then(() => console.log('Wallet creation process completed successfully'))
+  .catch(error => console.error('Wallet creation failed:', error));
